@@ -1,0 +1,25 @@
+{
+  "name": "talespire-slab-codec",
+  "version": "1.0.0",
+  "description": "Encode and decode TaleSpire slab codes, including the undocumented v2 (Chimera) binary format",
+  "license": "MIT",
+  "author": "Mathieu Cozanet Merlingeas",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mathieu-cozanet/talespire-slab-codec.git"
+  },
+  "keywords": [
+    "talespire",
+    "slab",
+    "reverse-engineering",
+    "binary-format",
+    "ttrpg"
+  ],
+  "scripts": {
+    "decode": "node scripts/decode-v2.js",
+    "test": "node scripts/roundtrip-v1.js"
+  },
+  "dependencies": {
+    "pako": "^2.1.0"
+  }
+}

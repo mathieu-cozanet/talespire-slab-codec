@@ -1,0 +1,6 @@
+node_modules/
+*.log
+
+# Slab codes copied out of the game are other people's map content — keep them local.
+slab_code.txt
+*.slab.txt

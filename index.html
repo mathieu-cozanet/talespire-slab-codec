@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TaleSpire Map Gen — Prototype v2 (ICTINUS)</title>
+<!-- pako v2 (gzip) — fichier LOCAL, aucune dépendance internet -->
+<script src="pako.min.js"></script>
+<style>
+  :root { --ink:#1a1a22; --steel:#3b4a63; --cream:#f4f1ea; --gold:#c9a24a; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, sans-serif; background: var(--ink); color: var(--cream);
+         margin: 0; padding: 24px; line-height: 1.5; }
+  h1 { color: var(--gold); font-weight: 600; margin-bottom: 4px; }
+  h2 { color: var(--gold); border-bottom: 1px solid #ffffff22; padding-bottom: 6px; margin-top: 0; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 900px){ .grid { grid-template-columns: 1fr; } }
+  .card { background: #ffffff0a; border: 1px solid #ffffff15; border-radius: 12px; padding: 18px; }
+  label { display:block; font-size: 13px; color:#cbd5e1; margin: 10px 0 4px; }
+  input, textarea, select { width:100%; background:#0d0f15; color:var(--cream); border:1px solid #ffffff22;
+          border-radius:8px; padding:8px 10px; font-family: ui-monospace, monospace; font-size:13px; }
+  textarea { min-height: 110px; resize: vertical; }
+  button { background: var(--gold); color:#1a1a22; border:none; border-radius:8px; padding:10px 16px;
+           font-weight:600; cursor:pointer; margin-top:12px; }
+  button.sec { background:#ffffff14; color:var(--cream); }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  .hint { font-size:12px; color:#94a3b8; }
+  pre { background:#0d0f15; border:1px solid #ffffff22; border-radius:8px; padding:12px;
+        white-space:pre-wrap; word-break:break-all; font-size:12px; max-height:300px; overflow:auto; }
+  .ok { color:#86efac; } .err { color:#fca5a5; }
+  code { color: var(--gold); }
+</style>
+</head>
+<body>
+<h1>TaleSpire Map Gen — Prototype <span style="color:#86efac">v2</span></h1>
+<div id="status" style="padding:8px 12px;border-radius:8px;margin:8px 0 12px;font-size:13px;"></div>
+<p class="hint">Format slab <b>v2 (« Chimera »)</b>, validé par round-trip sur un vrai slab. Coordonnées en 1/100 de tuile (100 = 1 case). <b>x/y</b> = plan horizontal, <b>z</b> = hauteur. Bootstrap sans Python : copie une tuile dans TaleSpire (Ctrl+C) → colle-la dans le décodeur → récupère son GUID.</p>
+
+<div class="grid">
+
+  <!-- ================= DÉCODEUR ================= -->
+  <div class="card">
+    <h2>1 · Décodeur (récupérer un GUID)</h2>
+    <label>Colle ici un slab copié depuis TaleSpire (ou depuis talestavern.com)</label>
+    <textarea id="decIn" placeholder="H4sI... ou `H4sI...`"></textarea>
+    <button class="sec" onclick="doDecode()">Décoder</button>
+    <pre id="decOut">—</pre>
+  </div>
+
+  <!-- ================= GÉNÉRATEUR ================= -->
+  <div class="card">
+    <h2>2 · Générateur de salle</h2>
+    <div class="row">
+      <div><label>Largeur (cases, axe X)</label><input id="w" type="number" value="8" min="1"></div>
+      <div><label>Profondeur (cases, axe Y)</label><input id="d" type="number" value="6" min="1"></div>
+    </div>
+
+    <label>GUID du SOL (remplace par le tien via le décodeur)</label>
+    <input id="floorGuid" value="16dca349-3089-4547-b258-bd467413aa42">
+    <label>GUID du MUR (laisse vide = pas de murs)</label>
+    <input id="wallGuid" value="">
+    <label style="display:flex;align-items:center;gap:8px">
+      <input type="checkbox" id="walls" style="width:auto"> Murs en périmètre (z = 1 niveau)
+    </label>
+
+    <button onclick="doGenerate()">Générer le slab</button>
+    <label>Code à coller dans TaleSpire (Ctrl+V dans le monde)</label>
+    <textarea id="genOut" readonly></textarea>
+    <button class="sec" onclick="copyOut()">Copier</button>
+    <span id="copyMsg" class="hint"></span>
+  </div>
+</div>
+
+<!-- ================= DONJON PROCÉDURAL ================= -->
+<div class="card" style="margin-top:24px">
+  <h2>3 · Donjon procédural (salles + couloirs + murs)</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px">
+    <div>
+      <div class="row">
+        <div><label>Carte largeur (cases)</label><input id="mw" type="number" value="32" min="8"></div>
+        <div><label>Carte hauteur (cases)</label><input id="mh" type="number" value="24" min="8"></div>
+      </div>
+      <div class="row">
+        <div><label>Nb salles (cible)</label><input id="nrooms" type="number" value="7" min="1"></div>
+        <div><label>Salle min</label><input id="rmin" type="number" value="3" min="1"></div>
+        <div><label>Salle max</label><input id="rmax" type="number" value="7" min="1"></div>
+      </div>
+      <div class="row">
+        <div><label>Seed</label><input id="seed" value="ICTINUS"></div>
+        <div><label>Rotation murs (0-3)</label><input id="wrot" type="number" value="0" min="0" max="3"></div>
+      </div>
+      <label>GUID SOL</label>
+      <input id="dFloorGuid" value="16dca349-3089-4547-b258-bd467413aa42">
+      <label>GUID MUR (colle le tien via le décodeur)</label>
+      <input id="dWallGuid" value="55421077-5672-492d-9609-89befbf9eb9d">
+      <label style="display:flex;align-items:center;gap:8px">
+        <input type="checkbox" id="dWalls" checked style="width:auto"> Générer les murs
+      </label>
+      <button onclick="doDungeon()">Générer le donjon</button>
+      <button class="sec" onclick="doDungeonReroll()">🎲 Nouveau seed</button>
+      <span id="dInfo" class="hint" style="display:block;margin-top:8px"></span>
+    </div>
+    <div>
+      <label>Aperçu 2D (cream = sol, bleu = mur)</label>
+      <canvas id="dCanvas" width="384" height="288" style="width:100%;background:#0d0f15;border:1px solid #ffffff22;border-radius:8px;image-rendering:pixelated"></canvas>
+      <label>Code donjon à coller (Ctrl+V dans TaleSpire)</label>
+      <textarea id="dOut" readonly></textarea>
+      <button class="sec" onclick="copyDungeon()">Copier le donjon</button>
+      <span id="dCopyMsg" class="hint"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+'use strict';
+// ===================== FORMAT SLAB v2 (« Chimera ») =====================
+// Header(10): CE FA CE D1 02 00 + uint32LE(nbAssetsUniques)
+// Asset(20): UUID 16o (p0 LE4, p1 LE2, p2 LE2, p3 BE2, p4 BE6) + uint32LE(nbInstances)
+// Position(8): blob 64b LE = x(0-15) | z(18-33) | y(36-51) | rot(54+) ; coords ×100=1 case ; rot 0-23 (×15°)
+// Fin: 4o padding
+
+function hexN(n, len){ return n.toString(16).toUpperCase().padStart(len,'0'); }
+
+// ----- UUID "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -> 16 octets (endianness mixte) -----
+function uuidToBytes(uuid){
+  const pr = uuid.replace(/[{}]/g,'').split('-');
+  const out = new Uint8Array(16);
+  const dv = new DataView(out.buffer);
+  dv.setUint32(0, parseInt(pr[0],16), true);   // LE
+  dv.setUint16(4, parseInt(pr[1],16), true);   // LE
+  dv.setUint16(6, parseInt(pr[2],16), true);   // LE
+  dv.setUint16(8, parseInt(pr[3],16), false);  // BE
+  const p4 = BigInt('0x'+pr[4]);
+  for(let i=0;i<6;i++) out[10+i] = Number((p4 >> BigInt((5-i)*8)) & 0xFFn); // BE
+  return out;
+}
+function bytesToUuid(dv, off){
+  const p0 = dv.getUint32(off, true);
+  const p1 = dv.getUint16(off+4, true);
+  const p2 = dv.getUint16(off+6, true);
+  const p3 = dv.getUint16(off+8, false);
+  let p4 = 0n; for(let i=0;i<6;i++) p4 = (p4<<8n) | BigInt(dv.getUint8(off+10+i));
+  return (hexN(p0,8)+'-'+hexN(p1,4)+'-'+hexN(p2,4)+'-'+hexN(p3,4)+'-'+hexN(Number(p4),12)).toLowerCase();
+}
+
+// ----- ENCODE -----  layouts = [{ uuid, instances:[{x,y,z,rot}] }]
+function encodeSlab(layouts){
+  const total = layouts.reduce((s,l)=>s+l.instances.length,0);
+  const size = 10 + layouts.length*20 + total*8 + 4;
+  const buf = new ArrayBuffer(size);
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  let p = 0;
+  u8.set([0xCE,0xFA,0xCE,0xD1,0x02,0x00], 0); p = 6;
+  dv.setUint32(p, layouts.length, true); p += 4;
+  layouts.forEach(l => {
+    u8.set(uuidToBytes(l.uuid), p); p += 16;
+    dv.setUint32(p, l.instances.length, true); p += 4;
+  });
+  layouts.forEach(l => l.instances.forEach(q => {
+    const blob = (BigInt(q.x)&0xFFFFn)
+               | ((BigInt(q.z)&0xFFFFn)<<18n)
+               | ((BigInt(q.y)&0xFFFFn)<<36n)
+               | ((BigInt(q.rot||0)&0x1Fn)<<54n);
+    dv.setBigUint64(p, blob, true); p += 8;
+  }));
+  // 4 derniers octets = padding (déjà 0)
+  const gz = pako.gzip(u8);
+  let s=''; for(let i=0;i<gz.length;i++) s += String.fromCharCode(gz[i]);
+  return btoa(s);
+}
+
+// ----- DECODE -----
+function decodeSlab(code){
+  code = code.replace(/[`\s]/g,'');
+  const bin = new Uint8Array(atob(code).split('').map(c=>c.charCodeAt(0)));
+  const data = pako.inflate(bin);
+  const dv = new DataView(data.buffer);
+  const version = dv.getUint8(4);
+  let p = 6;
+  const uniqueCount = dv.getUint32(p, true); p += 4;
+  const assets = [];
+  for(let i=0;i<uniqueCount;i++){
+    const uuid = bytesToUuid(dv, p);
+    const count = dv.getUint32(p+16, true);
+    assets.push({uuid, count}); p += 20;
+  }
+  const total = assets.reduce((s,a)=>s+a.count,0);
+  const flat = [];
+  for(let i=0;i<total;i++){
+    const blob = dv.getBigUint64(p, true); p += 8;
+    flat.push({
+      x: Number(blob & 0xFFFFn),
+      z: Number((blob>>18n)&0xFFFFn),
+      y: Number((blob>>36n)&0xFFFFn),
+      rot: Number(blob>>54n)
+    });
+  }
+  let k=0; assets.forEach(a => { a.instances = flat.slice(k, k+a.count); k += a.count; });
+  return {version, uniqueCount, total, assets};
+}
+
+// ===================== UI =====================
+function doDecode(){
+  const out = document.getElementById('decOut');
+  const raw = document.getElementById('decIn').value;
+  if(!raw.trim()){ out.innerHTML = '<span class="err">Champ vide — colle d\'abord un slab (Ctrl+V).</span>'; return; }
+  if(typeof pako === 'undefined'){ out.innerHTML = '<span class="err">pako non chargé : ouvre prototype.html DANS le dossier talespire-map-gen.</span>'; return; }
+  try{
+    const r = decodeSlab(raw);
+    if(r.version !== 2){ out.innerHTML = '<span class="err">Version '+r.version+' inattendue (on gère v2).</span>'; return; }
+    let txt = `version: ${r.version}  |  assets uniques: ${r.uniqueCount}  |  instances: ${r.total}\n\nGUID (× nb d'instances) :\n`;
+    r.assets.slice(0,40).forEach(a => { txt += `  ${a.uuid}  ×${a.count}\n`; });
+    if(r.assets.length>40) txt += `  … +${r.assets.length-40} autres\n`;
+    out.innerHTML = '<span class="ok">'+txt+'</span>';
+  }catch(e){ out.innerHTML = '<span class="err">Erreur: '+e.message+'</span>'; }
+}
+
+function doGenerate(){
+  const W = +document.getElementById('w').value, D = +document.getElementById('d').value;
+  const floor = document.getElementById('floorGuid').value.trim();
+  const wallGuid = document.getElementById('wallGuid').value.trim();
+  const useWalls = document.getElementById('walls').checked && wallGuid.length>0;
+  const S = 100; // 1 case = 100 unités
+
+  const layouts = [];
+
+  // SOL : grille W×D au niveau z=0
+  const floorInst = [];
+  for(let x=0;x<W;x++) for(let y=0;y<D;y++){
+    floorInst.push({x:x*S, y:y*S, z:0, rot:0});
+  }
+  layouts.push({uuid:floor, instances:floorInst});
+
+  // MURS : périmètre à z=100 (1 niveau au-dessus du sol)
+  if(useWalls){
+    const wallInst = [];
+    const zw = 100;
+    for(let x=0;x<W;x++){
+      wallInst.push({x:x*S, y:0,        z:zw, rot:0});   // bord nord
+      wallInst.push({x:x*S, y:(D-1)*S,  z:zw, rot:12});  // bord sud (180°)
+    }
+    for(let y=0;y<D;y++){
+      wallInst.push({x:0,        y:y*S, z:zw, rot:6});   // bord ouest (90°)
+      wallInst.push({x:(W-1)*S,  y:y*S, z:zw, rot:18});  // bord est (270°)
+    }
+    layouts.push({uuid:wallGuid, instances:wallInst});
+  }
+
+  document.getElementById('genOut').value = encodeSlab(layouts);
+  document.getElementById('copyMsg').textContent =
+    'Généré : ' + layouts.reduce((s,l)=>s+l.instances.length,0) + ' tuiles. Clique Copier.';
+}
+
+function copyOut(){
+  const t = document.getElementById('genOut');
+  if(!t.value){ document.getElementById('copyMsg').textContent='Rien à copier — clique d\'abord « Générer ».'; return; }
+  t.select();
+  navigator.clipboard.writeText(t.value).then(()=>{
+    document.getElementById('copyMsg').textContent = 'Copié ✔ — Ctrl+V dans TaleSpire';
+  }).catch(()=>{ document.getElementById('copyMsg').textContent='Sélectionné — fais Ctrl+C.'; });
+}
+
+// ===================== DONJON PROCÉDURAL =====================
+let lastDungeon = null; // {grid, walls, MW, MH, rooms}
+
+function strHash(s){ let h=2166136261>>>0; for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,16777619); } return h>>>0; }
+function mulberry32(a){ return function(){ a|=0; a=a+0x6D2B79F5|0; let t=Math.imul(a^a>>>15,1|a); t=t+Math.imul(t^t>>>7,61|t)^t; return ((t^t>>>14)>>>0)/4294967296; }; }
+
+function generateDungeon(p){
+  const MW=p.mw, MH=p.mh;
+  const rng=mulberry32(strHash(p.seed));
+  const ri=(min,max)=>min+Math.floor(rng()*(max-min+1));
+  const grid=Array.from({length:MH},()=>new Array(MW).fill(0)); // 0 vide, 1 sol
+  const rooms=[];
+  let tries=0;
+  while(rooms.length<p.nrooms && tries<p.nrooms*40){
+    tries++;
+    const w=ri(p.rmin,p.rmax), h=ri(p.rmin,p.rmax);
+    const x=ri(1,MW-w-2), y=ri(1,MH-h-2);
+    if(x<1||y<1) continue;
+    // pas de chevauchement (marge 1 case)
+    let clash=false;
+    for(const r of rooms){
+      if(x-1 < r.x+r.w+1 && x+w+1 > r.x-1 && y-1 < r.y+r.h+1 && y+h+1 > r.y-1){ clash=true; break; }
+    }
+    if(clash) continue;
+    rooms.push({x,y,w,h,cx:x+(w>>1),cy:y+(h>>1)});
+    for(let j=y;j<y+h;j++) for(let i=x;i<x+w;i++) grid[j][i]=1;
+  }
+  // couloirs : relie chaque salle à la précédente (L)
+  const carveH=(x1,x2,y)=>{ for(let x=Math.min(x1,x2);x<=Math.max(x1,x2);x++) if(grid[y]) grid[y][x]=1; };
+  const carveV=(y1,y2,x)=>{ for(let y=Math.min(y1,y2);y<=Math.max(y1,y2);y++) if(grid[y]) grid[y][x]=1; };
+  for(let i=1;i<rooms.length;i++){
+    const a=rooms[i-1], b=rooms[i];
+    if(rng()<0.5){ carveH(a.cx,b.cx,a.cy); carveV(a.cy,b.cy,b.cx); }
+    else { carveV(a.cy,b.cy,a.cx); carveH(a.cx,b.cx,b.cy); }
+  }
+  // murs : chaque ARÊTE d'une case-sol exposée au vide (ou hors carte) reçoit un mur,
+  // posé SUR la case de sol (pas dans la case voisine) -> mur collé au bord, ouvertures préservées
+  const walls=[]; // {x,y,dir}  dir 0=N,1=E,2=S,3=O
+  const dirs=[[0,-1,0],[1,0,1],[0,1,2],[-1,0,3]];
+  for(let y=0;y<MH;y++) for(let x=0;x<MW;x++){
+    if(grid[y][x]!==1) continue;
+    for(const [dx,dy,dir] of dirs){
+      const nx=x+dx, ny=y+dy;
+      if(nx<0||ny<0||nx>=MW||ny>=MH||grid[ny][nx]===0) walls.push({x,y,dir});
+    }
+  }
+  return {grid, walls, MW, MH, rooms};
+}
+
+function renderDungeon(D){
+  const cv=document.getElementById('dCanvas'), ctx=cv.getContext('2d');
+  const cell=Math.max(2, Math.floor(Math.min(cv.width/D.MW, cv.height/D.MH)));
+  cv.width=D.MW*cell; cv.height=D.MH*cell;
+  ctx.fillStyle='#0d0f15'; ctx.fillRect(0,0,cv.width,cv.height);
+  for(let y=0;y<D.MH;y++) for(let x=0;x<D.MW;x++){
+    if(D.grid[y][x]===1){ ctx.fillStyle='#e8dcc0'; ctx.fillRect(x*cell,y*cell,cell,cell); }
+  }
+  ctx.fillStyle='#6ea8ff';
+  const t=Math.max(1, Math.floor(cell/4));
+  for(const w of D.walls){
+    const px=w.x*cell, py=w.y*cell;
+    if(w.dir===0) ctx.fillRect(px, py, cell, t);              // N : arête haute
+    else if(w.dir===1) ctx.fillRect(px+cell-t, py, t, cell);  // E : arête droite
+    else if(w.dir===2) ctx.fillRect(px, py+cell-t, cell, t);  // S : arête basse
+    else ctx.fillRect(px, py, t, cell);                       // O : arête gauche
+  }
+}
+
+function dungeonToSlab(D, floorGuid, wallGuid, useWalls, wrotStep){
+  const S=100, layouts=[];
+  const floorInst=[];
+  for(let y=0;y<D.MH;y++) for(let x=0;x<D.MW;x++) if(D.grid[y][x]===1)
+    floorInst.push({x:x*S, y:y*S, z:0, rot:0});
+  layouts.push({uuid:floorGuid, instances:floorInst});
+  let wallCount=0;
+  if(useWalls && wallGuid){
+    const wallInst=[];
+    const dirRot={0:0,1:6,2:12,3:18}; // N,E,S,O -> 0/90/180/270
+    for(const w of D.walls){
+      const rot=((dirRot[w.dir] + wrotStep*6) % 24);
+      wallInst.push({x:w.x*S, y:w.y*S, z:0, rot});
+    }
+    layouts.push({uuid:wallGuid, instances:wallInst});
+    wallCount=wallInst.length;
+  }
+  return {slab:encodeSlab(layouts), floors:floorInst.length, walls:wallCount};
+}
+
+function doDungeon(){
+  const p={
+    mw:+document.getElementById('mw').value, mh:+document.getElementById('mh').value,
+    nrooms:+document.getElementById('nrooms').value,
+    rmin:+document.getElementById('rmin').value, rmax:+document.getElementById('rmax').value,
+    seed:document.getElementById('seed').value||'seed'
+  };
+  const D=generateDungeon(p); lastDungeon=D; renderDungeon(D);
+  const floorGuid=document.getElementById('dFloorGuid').value.trim();
+  const wallGuid=document.getElementById('dWallGuid').value.trim();
+  const useWalls=document.getElementById('dWalls').checked;
+  const wrot=+document.getElementById('wrot').value||0;
+  if(useWalls && !wallGuid){
+    document.getElementById('dInfo').innerHTML='<span class="err">Coche murs mais GUID mur vide — récupère-le via le décodeur.</span>';
+  }
+  const r=dungeonToSlab(D, floorGuid, wallGuid, useWalls, wrot);
+  document.getElementById('dOut').value=r.slab;
+  document.getElementById('dInfo').textContent=`${D.rooms.length} salles · ${r.floors} sols · ${r.walls} murs. Clique « Copier le donjon ».`;
+}
+
+function doDungeonReroll(){
+  document.getElementById('seed').value = Math.random().toString(36).slice(2,8).toUpperCase();
+  doDungeon();
+}
+
+function copyDungeon(){
+  const t=document.getElementById('dOut');
+  if(!t.value){ document.getElementById('dCopyMsg').textContent='Génère d\'abord.'; return; }
+  navigator.clipboard.writeText(t.value).then(()=>{ document.getElementById('dCopyMsg').textContent='Copié ✔ — Ctrl+V dans TaleSpire'; })
+   .catch(()=>{ t.select(); document.getElementById('dCopyMsg').textContent='Sélectionné — Ctrl+C.'; });
+}
+
+// Indicateur d'état au chargement
+window.addEventListener('load', function(){
+  const s = document.getElementById('status');
+  if(typeof pako === 'undefined'){
+    s.style.background='#7f1d1d'; s.style.color='#fecaca';
+    s.textContent='⚠ pako NON chargé — ouvre ce fichier depuis le dossier talespire-map-gen (pako.min.js doit être à côté).';
+  } else {
+    s.style.background='#14532d'; s.style.color='#bbf7d0';
+    s.textContent='✓ Prêt — format v2, pako '+(pako.version||'2.x')+' chargé localement.';
+  }
+});
+</script>
+</body>
+</html>
