@@ -135,4 +135,4 @@ file bugs about this tool with them.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Third-party notices are in [NOTICE.md](NOTICE.md).
